@@ -34,7 +34,7 @@ var (
 
 const maxQueryBlockSize int64 = 2000
 const defaultMallocCap int64 = 1024
-const maxConcurrentNumber = 8e4
+const maxConcurrentNumber = 1e5
 const maxWorkNumber = maxConcurrentNumber / maxQueryBlockSize
 const emergencyRecovery = 100
 const smoothRecoverRatio = 0.25
@@ -45,7 +45,7 @@ func (c *ethClient) GetCurrentBlockNumber() (uint64, error) {
 	return c.client.BlockNumber(context.Background())
 }
 
-func (c *ethClient) GetEvent(timeout time.Duration, from int64, to int64, address []common.Address, topics [][]common.Hash) (stream *LogsStream, err error) {
+func (c *ethClient) GetEvent(timeout time.Duration, from int64, to int64, address []common.Address, topics [][]common.Hash) (stream *logsStream, err error) {
 	info := newGlobalInfo(timeout, from, to, address, topics)
 	var workNumber = info.workNumber
 	var i int32 = 0
@@ -59,7 +59,7 @@ func (c *ethClient) GetEvent(timeout time.Duration, from int64, to int64, addres
 	}
 	logs := info.arrangeLogs()
 	finalizer(info)
-	stream = &LogsStream{
+	stream = &logsStream{
 		logs:      logs,
 		client:    c,
 		m:         sync.Mutex{},
@@ -90,7 +90,7 @@ func newGlobalInfo(timeout time.Duration, from int64, to int64, address []common
 		workNumber++
 	}
 	g = &globalInfo{end: to, errTrigger: sync.Once{}, mutex: sync.Mutex{}, workNumber: int32(workNumber), address: address, topics: topics, offset: from, timeout: timeout, queue: make([]*logsWork, workNumber), group: sync.WaitGroup{}}
-	var chanNumber int64 = workNumber
+	var chanNumber = workNumber
 	if chanNumber > maxWorkNumber {
 		chanNumber = maxWorkNumber
 	}

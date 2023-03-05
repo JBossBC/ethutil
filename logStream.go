@@ -18,9 +18,10 @@ const maxConcurrentHandlerNumber = maxWorkerNumber * defaultHandlerNumberPerWork
 
 var retryDuration = time.Second
 
-// logs filter Stream
+// logsStream  logs filter Stream
+//@notice the stream can't copy,because it will spend huge memory consumer and maybe set error work task
 
-type LogsStream struct {
+type logsStream struct {
 	client *ethClient
 	logs   []types.Log
 	err    error
@@ -37,12 +38,12 @@ type LogsStream struct {
 	group      sync.WaitGroup
 }
 
-func (l *LogsStream) check() {
+func (l *logsStream) check() {
 	if uintptr(l.nocopy) != uintptr(unsafe.Pointer(l)) && !atomic.CompareAndSwapUintptr((*uintptr)(&l.nocopy), 0, uintptr(unsafe.Pointer(l))) && uintptr(l.nocopy) != uintptr(unsafe.Pointer(l)) {
 		panic(any("object has copied"))
 	}
 }
-func (l *LogsStream) tryNotify() *workUnit {
+func (l *logsStream) tryNotify() *workUnit {
 	l.workMutex.Lock()
 	defer l.workMutex.Unlock()
 	if len(l.waitWork) < 1 {
@@ -54,35 +55,39 @@ func (l *LogsStream) tryNotify() *workUnit {
 	l.group.Add(1)
 	return work
 }
-func NewLogsStream(log []types.Log, client *ethClient) *LogsStream {
-	return &LogsStream{
+func NewLogsStream(log []types.Log, client *ethClient) (stream *logsStream) {
+	stream = &logsStream{
 		logs:      log,
 		client:    client,
 		m:         sync.Mutex{},
 		workMutex: sync.Mutex{},
 		group:     sync.WaitGroup{},
 	}
+	stream.check()
+	return stream
 }
-func NewDefaultLogsStream(log []types.Log) (*LogsStream, error) {
+func NewDefaultLogsStream(log []types.Log) (stream *logsStream, err error) {
 	if globalProto.client == nil {
 		return nil, errors.New("default client cant init")
 	}
-	return &LogsStream{
+	stream = &logsStream{
 		logs:      log,
 		client:    globalProto,
 		m:         sync.Mutex{},
 		workMutex: sync.Mutex{},
 		group:     sync.WaitGroup{},
-	}, nil
+	}
+	stream.check()
+	return stream, nil
 }
-func (l *LogsStream) workBefore() {
+func (l *logsStream) workBefore() {
 	onWorkStream(l)
 }
-func (l *LogsStream) workAfter() {
+func (l *logsStream) workAfter() {
 	collect(l)
 }
 
-func (l *LogsStream) TxFromAndTo(from []common.Address) *LogsStream {
+func (l *logsStream) TxFrom(from []common.Address) *logsStream {
 	l.check()
 	l.m.Lock()
 	defer l.m.Unlock()
@@ -94,10 +99,10 @@ func (l *LogsStream) TxFromAndTo(from []common.Address) *LogsStream {
 	//handler
 	for i := 0; i < len(l.work); i++ {
 		go func(index int) {
-			txFromAndTo(l.work[index], from)
+			txFrom(l.work[index], from)
 			if !l.work[index].tryEnd() {
 				work := l.tryNotify()
-				txFromAndTo(work, from)
+				txFrom(work, from)
 				work.end()
 			}
 		}(i)
@@ -109,7 +114,7 @@ func (l *LogsStream) TxFromAndTo(from []common.Address) *LogsStream {
 			break
 		}
 		go func(work *workUnit) {
-			txFromAndTo(work, from)
+			txFrom(work, from)
 			work.end()
 		}(work)
 	}
@@ -117,7 +122,7 @@ func (l *LogsStream) TxFromAndTo(from []common.Address) *LogsStream {
 	return l
 }
 
-var txFromAndTo = func(unit *workUnit, from []common.Address) {
+var txFrom = func(unit *workUnit, from []common.Address) {
 filter:
 	for i := unit.from; i < unit.to; i++ {
 		var logsInfo = unit.stream.logs[i]
@@ -144,7 +149,7 @@ filter:
 	}
 }
 
-func (l *LogsStream) FilterLog(filter FilterFunc) *LogsStream {
+func (l *logsStream) FilterLog(filter FilterFunc) *logsStream {
 	l.check()
 	if l.err != nil {
 		return l
@@ -189,7 +194,7 @@ func (l *LogsStream) FilterLog(filter FilterFunc) *LogsStream {
 	return l
 }
 
-func (l *LogsStream) Done() (result []types.Log, err error) {
+func (l *logsStream) Done() (result []types.Log, err error) {
 	l.check()
 	result = make([]types.Log, len(l.logs))
 	copy(result, l.logs)
@@ -201,7 +206,7 @@ func (l *LogsStream) Done() (result []types.Log, err error) {
 	return result, nil
 }
 
-func streamFinalizer(l *LogsStream) {
+func streamFinalizer(l *logsStream) {
 	for i := 0; i < len(l.finishWork); i++ {
 		l.finishWork[i].stream = nil
 	}
@@ -211,7 +216,7 @@ func streamFinalizer(l *LogsStream) {
 type nocopy uintptr
 type FilterFunc func(log []types.Log, work *workUnit) error
 
-func onWorkStream(stream *LogsStream) {
+func onWorkStream(stream *logsStream) {
 	var workNumber, remainNumber int
 	if maxConcurrentHandlerNumber < len(stream.logs) {
 		workNumber = maxWorkerNumber
@@ -231,7 +236,7 @@ func onWorkStream(stream *LogsStream) {
 	stream.workNumber = workNumber + remainNumber
 	mallocWorkUnit(stream, workNumber, remainNumber)
 }
-func mallocWorkUnit(stream *LogsStream, workNumber int, remainNumber int) {
+func mallocWorkUnit(stream *logsStream, workNumber int, remainNumber int) {
 	var begin, end = 0, len(stream.logs)
 	if !stream.init {
 		stream.work = make([]*workUnit, 0, workNumber)
@@ -285,7 +290,7 @@ func mallocWorkUnit(stream *LogsStream, workNumber int, remainNumber int) {
 		begin = to
 	}
 }
-func collect(stream *LogsStream) {
+func collect(stream *logsStream) {
 	stream.logs = nil
 	var result = make([]types.Log, 0, len(stream.logs))
 	for i := 0; i < stream.workNumber; i++ {
@@ -298,7 +303,7 @@ type workUnit struct {
 	result []types.Log
 	from   int
 	to     int
-	stream *LogsStream
+	stream *logsStream
 }
 
 func (work *workUnit) tryEnd() bool {

@@ -8,3 +8,11 @@ concurrent_searchLog在go-ethereum中client.QueryFilter的基础上优化perform
 + 保证并发HTTP请求的原子性,在网络不会出现问题的情况下,一定能获取全部的日志
 
 
+# logStream
+
+## txFrom:查找由指定交易发起的交易
+
+## FilterLog: 根据用户自己定义的过滤条件过滤指定的日志
+
+      + func(log []types.Log, work *workUnit) error 用户需定义对局部日志的筛选函数
+
