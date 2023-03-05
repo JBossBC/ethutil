@@ -16,3 +16,4 @@ concurrent_searchLog在go-ethereum中client.QueryFilter的基础上优化perform
 
       + func(log []types.Log, work *workUnit) error 用户需定义对局部日志的筛选函数
 
+## search contract creator by logs (readying)
