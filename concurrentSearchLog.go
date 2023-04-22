@@ -74,6 +74,7 @@ func finalizer(info *globalInfo) {
 		info.queue[i].shareInfo = nil
 	}
 	runtime.SetFinalizer(info, nil)
+	info = nil
 }
 func (g *globalInfo) arrangeLogs() []types.Log {
 	var i int32 = 0
